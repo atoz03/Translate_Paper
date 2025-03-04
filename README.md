@@ -1,7 +1,51 @@
 # Translate_Paper
- python tool
-# Translate_Paper
 这是一个用于文本翻译的Python工具，旨在提供高效、准确的翻译服务。该工具使用Gemini API进行翻译，支持中英文之间的互译。用户可以通过简单的图形界面输入文本，选择翻译方向，并获取翻译结果。
+
+## 使用说明
+
+### 首次使用
+
+1. 首次运行时需要输入 Gemini API 密钥
+2. 可以选择是否保存 API 密钥到本地
+3. 程序会自动测试 API 连接是否正常
+
+### 基本功能
+
+- **文本翻译**：
+  - 在左侧文本框输入需要翻译的文本
+  - 点击中间的"翻译"按钮进行翻译
+  - 翻译结果会显示在右侧文本框
+
+- **PDF 翻译**：
+  - 点击"上传 PDF"按钮选择 PDF 文件
+  - 使用"上一页"和"下一页"按钮浏览 PDF 内容
+  - 点击翻译按钮翻译当前页面内容
+
+- **其他功能**：
+  - 使用"中 ⇄ 英"按钮切换翻译方向
+  - "复制译文"按钮可快速复制翻译结果
+  - "清空"按钮可清除所有内容
+  - 实时显示字数和字符统计
+
+## 注意事项
+
+1. 需要有效的 Gemini API 密钥
+2. 确保网络环境能够访问 Gemini API
+3. PDF 文件需要是可提取文本的格式
+4. 大文件翻译可能需要较长时间
+
+## 技术栈
+
+- Python 3.x
+- PyQt6 - GUI 框架
+- Google Generative AI - 翻译服务
+- PyMuPDF - PDF 处理
+
+## 配置说明
+
+- API 密钥存储在 `translator_config.json` 文件中
+- 代理设置可在 `main.py` 中配置
+- 默认代理端口：7897
 
 ## 特性
 - 支持中英文互译
@@ -14,7 +58,7 @@
 1. 确保已安装Python 3.x。
 2. 克隆此仓库：
    ```bash
-   git clone https://github.com/yourusername/Translate_Paper.git
+   git clone https://github.com/atoz03/Translate_Paper.git
    ```
 3. 安装所需的依赖：
    ```bash
