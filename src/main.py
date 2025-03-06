@@ -18,6 +18,7 @@ import google.generativeai as genai
 from config import Config
 import fitz  # PyMuPDF
 from PyQt6.QtGui import QIcon, QPalette, QColor, QFont
+from translator import GeminiTranslator, ZhipuAITranslator
 
 def resource_path(relative_path):
     """获取资源的绝对路径"""
@@ -41,9 +42,14 @@ class APIKeyDialog(QDialog):
         layout.addWidget(info_label)
         
         # 添加输入框
-        self.key_input = QLineEdit()
-        self.key_input.setPlaceholderText('在此输入API密钥...')
-        layout.addWidget(self.key_input)
+        self.gemini_key_input = QLineEdit()
+        self.gemini_key_input.setPlaceholderText('在此输入Gemini API密钥...')
+        layout.addWidget(self.gemini_key_input)
+        
+        # 添加智谱AI API密钥输入框
+        self.zhipu_key_input = QLineEdit()
+        self.zhipu_key_input.setPlaceholderText('在此输入智谱AI API密钥...')
+        layout.addWidget(self.zhipu_key_input)
         
         # 添加按钮
         button_layout = QHBoxLayout()
@@ -57,55 +63,25 @@ class APIKeyDialog(QDialog):
         button_layout.addWidget(cancel_button)
         layout.addLayout(button_layout)
         
-    def get_api_key(self):
-        return self.key_input.text().strip()
+    def get_api_keys(self):
+        return self.gemini_key_input.text().strip(), self.zhipu_key_input.text().strip()
 
 class TranslatorThread(QThread):
     finished = pyqtSignal(str)
     error = pyqtSignal(str)
 
-    def __init__(self, text, api_key, is_english_to_chinese):
+    def __init__(self, text, translator, is_english_to_chinese):
         super().__init__()
         self.text = text
-        self.api_key = api_key
+        self.translator = translator
         self.is_english_to_chinese = is_english_to_chinese
 
     def run(self):
         try:
-            logging.info("开始配置API...")
-            genai.configure(api_key=self.api_key)
-            
-            # 使用 Gemini 2.0 Flash 模型
-            model = genai.GenerativeModel('gemini-2.0-flash')
-            
             logging.info("开始翻译...")
-            chat = model.start_chat(history=[])
-            
-            if self.is_english_to_chinese:
-                prompt = f"""
-                Translate the following English text to Chinese. Requirements:
-                1. Keep technical terms accurate
-                2. Make the translation natural and fluent
-                3. Only return the translated text without any explanation
-                
-                Text to translate:
-                {self.text}
-                """
-            else:
-                prompt = f"""
-                Translate the following Chinese text to English. Requirements:
-                1. Keep technical terms accurate
-                2. Make the translation professional and natural
-                3. Only return the translated text without any explanation
-                
-                Text to translate:
-                {self.text}
-                """
-            
-            response = chat.send_message(prompt)
-            
+            result = self.translator.translate(self.text, self.is_english_to_chinese)
             logging.info("翻译完成")
-            self.finished.emit(response.text.strip())
+            self.finished.emit(result)
         except Exception as e:
             logging.error(f"翻译错误: {str(e)}")
             self.error.emit(str(e))
@@ -113,24 +89,25 @@ class TranslatorThread(QThread):
 class TranslatorApp(QMainWindow):
     def __init__(self):
         super().__init__()
-        # 尝试从配置文件加载API密钥
-        saved_key = Config.load_api_key()
-        if saved_key:
-            reply = QMessageBox.question(
-                self,
-                "使用已保存的API密钥",
-                "是否使用上次保存的API密钥？",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-            )
-            if reply == QMessageBox.StandardButton.Yes:
-                self.api_key = saved_key
-            else:
-                self.api_key = self.get_api_key_from_user()
-        else:
-            self.api_key = self.get_api_key_from_user()
-            
-        if not self.api_key:
-            sys.exit(0)  # 如果用户取消，则退出程序
+        # 加载API密钥
+        gemini_key, zhipu_key = Config.load_api_keys()
+        
+        # 初始化翻译器
+        self.gemini_translator = None
+        self.zhipu_translator = None
+        self.current_translator = None
+        
+        if gemini_key:
+            self.gemini_translator = GeminiTranslator(gemini_key)
+            self.current_translator = self.gemini_translator
+        
+        if zhipu_key:
+            self.zhipu_translator = ZhipuAITranslator(zhipu_key)
+            if not self.current_translator:
+                self.current_translator = self.zhipu_translator
+        
+        if not self.current_translator:
+            self.get_api_keys_from_user()
             
         self.is_english_to_chinese = True
         self.pdf_doc = None
@@ -141,30 +118,30 @@ class TranslatorApp(QMainWindow):
         # 测试网络连接
         self.test_connection()
 
-    def get_api_key_from_user(self):
-        """显示对话框获取API密钥"""
+    def get_api_keys_from_user(self):
+        # 创建API密钥输入对话框
         dialog = APIKeyDialog(self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            api_key = dialog.get_api_key()
-            if api_key:
-                # 询问是否保存API密钥
-                reply = QMessageBox.question(
-                    self,
-                    "保存API密钥",
-                    "是否保存API密钥以便下次使用？",
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-                )
-                if reply == QMessageBox.StandardButton.Yes:
-                    Config.save_api_key(api_key)
-                return api_key
-            else:
-                QMessageBox.warning(self, "错误", "API密钥不能为空")
-                return self.get_api_key_from_user()
-        return None
+            gemini_key, zhipu_key = dialog.get_api_keys()
+            
+            if gemini_key:
+                self.gemini_translator = GeminiTranslator(gemini_key)
+                self.current_translator = self.gemini_translator
+            
+            if zhipu_key:
+                self.zhipu_translator = ZhipuAITranslator(zhipu_key)
+                if not self.current_translator:
+                    self.current_translator = self.zhipu_translator
+            
+            # 保存API密钥
+            Config.save_api_keys(gemini_key, zhipu_key)
+            
+        if not self.current_translator:
+            sys.exit(0)
 
     def test_connection(self):
         try:
-            genai.configure(api_key=self.api_key)
+            genai.configure(api_key=self.gemini_translator.api_key)
             model = genai.GenerativeModel('gemini-2.0-flash')
             response = model.generate_content("Hello")
             logging.info("API连接测试成功")
@@ -177,9 +154,10 @@ class TranslatorApp(QMainWindow):
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
             )
             if reply == QMessageBox.StandardButton.Yes:
-                new_key = self.get_api_key_from_user()
+                new_key = self.get_api_keys_from_user()
                 if new_key:
-                    self.api_key = new_key
+                    self.gemini_translator = GeminiTranslator(new_key)
+                    self.current_translator = self.gemini_translator
                     self.test_connection()
                 else:
                     sys.exit(0)
@@ -299,6 +277,16 @@ class TranslatorApp(QMainWindow):
         toolbar_layout.addWidget(self.prev_btn)
         toolbar_layout.addWidget(self.next_btn)
         
+        # 添加API切换按钮到工具栏
+        self.api_switch_btn = QPushButton('切换API')
+        self.api_switch_btn.clicked.connect(self.switch_api)
+        toolbar_layout.addWidget(self.api_switch_btn)
+        
+        # 添加当前API显示标签
+        self.api_label = QLabel()
+        self.update_api_label()
+        toolbar_layout.addWidget(self.api_label)
+        
         # 添加工具栏到主布局
         layout.addWidget(self.toolbar_widget)
 
@@ -313,8 +301,10 @@ class TranslatorApp(QMainWindow):
         # 左侧输入区
         left_layout = QVBoxLayout()
         self.source_text = QTextEdit()
-        self.update_source_placeholder()  # 更新占位符文本
+        self.update_source_placeholder()
         self.source_text.textChanged.connect(self.update_word_count)
+        # 更新提示文本
+        self.source_text.setPlaceholderText("在此输入文本...\n按Ctrl+Enter开始翻译")
         left_layout.addWidget(self.source_text)
 
         # 中间按钮区
@@ -443,13 +433,11 @@ class TranslatorApp(QMainWindow):
         if not source:
             return
             
-        # 添加按钮动画
         self.translate_btn.setEnabled(False)
         self.translate_btn.setText("翻译中...")
-        self.translate_animation.start()
         
-        # 创建翻译线程，传入翻译方向
-        self.thread = TranslatorThread(source, self.api_key, self.is_english_to_chinese)
+        # 使用当前选择的翻译器
+        self.thread = TranslatorThread(source, self.current_translator, self.is_english_to_chinese)
         self.thread.finished.connect(self.on_translation_finished)
         self.thread.error.connect(self.on_translation_error)
         self.thread.start()
@@ -547,6 +535,32 @@ class TranslatorApp(QMainWindow):
         self.show_animation.setEndValue(target_geometry)
         self.show_animation.setEasingCurve(QEasingCurve.Type.OutCubic)
         self.show_animation.start()
+
+    def update_api_label(self):
+        """更新API显示标签"""
+        api_name = "Gemini" if isinstance(self.current_translator, GeminiTranslator) else "智谱AI"
+        self.api_label.setText(f'当前API: {api_name}')
+
+    def switch_api(self):
+        """切换翻译API"""
+        if isinstance(self.current_translator, GeminiTranslator) and self.zhipu_translator:
+            self.current_translator = self.zhipu_translator
+        elif isinstance(self.current_translator, ZhipuAITranslator) and self.gemini_translator:
+            self.current_translator = self.gemini_translator
+        self.update_api_label()
+        self.statusBar().showMessage(f'已切换到{self.api_label.text()}', 2000)
+
+    def keyPressEvent(self, event):
+        """处理键盘事件"""
+        # 检查是否按下 Ctrl+Enter 且翻译按钮可用
+        if event.modifiers() == Qt.KeyboardModifier.ControlModifier and \
+           (event.key() == Qt.Key.Key_Return or event.key() == Qt.Key.Key_Enter) and \
+           self.translate_btn.isEnabled():
+            # 如果焦点在源文本框中，开始翻译
+            if self.source_text.hasFocus():
+                self.translate_text()
+        else:
+            super().keyPressEvent(event)
 
 def main():
     app = QApplication(sys.argv)
